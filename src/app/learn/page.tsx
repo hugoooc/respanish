@@ -174,16 +174,16 @@ export default function LearnPage() {
 
       <div className="flex-1 flex items-center justify-center">
         {currentCard.exerciseType === "flashcard" && (
-          <Flashcard sessionCard={currentCard} onRate={handleRate} />
+          <Flashcard key={currentCard.cardId} sessionCard={currentCard} onRate={handleRate} />
         )}
         {currentCard.exerciseType === "multiple_choice" && (
-          <MultipleChoice sessionCard={currentCard} onRate={handleRate} />
+          <MultipleChoice key={currentCard.cardId} sessionCard={currentCard} onRate={handleRate} />
         )}
         {currentCard.exerciseType === "fill_blank" && (
-          <FillBlank sessionCard={currentCard} onRate={handleRate} />
+          <FillBlank key={currentCard.cardId} sessionCard={currentCard} onRate={handleRate} />
         )}
         {currentCard.exerciseType === "sentence_build" && (
-          <SentenceBuilder sessionCard={currentCard} onRate={handleRate} />
+          <SentenceBuilder key={currentCard.cardId} sessionCard={currentCard} onRate={handleRate} />
         )}
       </div>
     </div>

@@ -5,74 +5,105 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, Loader2, Trophy } from "lucide-react";
+import { ArrowLeft, Loader2, Trophy, Plus, Clock } from "lucide-react";
 import { Flashcard } from "@/components/exercises/flashcard";
 import { MultipleChoice } from "@/components/exercises/multiple-choice";
 import { FillBlank } from "@/components/exercises/fill-blank";
 import { SentenceBuilder } from "@/components/exercises/sentence-builder";
 import {
   buildSession,
+  buildExtraNewCards,
   reviewCard,
+  getDueSoonCards,
+  getNextDueCard,
   Rating,
   type Grade,
 } from "@/lib/fsrs-engine";
 import { getSettings } from "@/lib/db";
 import type { SessionCard, SessionSummary } from "@/lib/types";
 
+type PageState = "loading" | "session" | "empty" | "summary";
+
 export default function LearnPage() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [session, setSession] = useState<SessionCard[]>([]);
+  const [pageState, setPageState] = useState<PageState>("loading");
+  const [queue, setQueue] = useState<SessionCard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [summary, setSummary] = useState<SessionSummary | null>(null);
   const [correctCount, setCorrectCount] = useState(0);
   const [incorrectCount, setIncorrectCount] = useState(0);
+  const [totalReviewed, setTotalReviewed] = useState(0);
   const [startTime] = useState(Date.now());
+  const [nextDue, setNextDue] = useState<{ due: Date; count: number } | null>(
+    null
+  );
+
+  const loadSession = useCallback(async () => {
+    setPageState("loading");
+    const settings = await getSettings();
+    if (!settings.placementCompleted) {
+      router.replace("/placement");
+      return;
+    }
+    const cards = await buildSession();
+    if (cards.length === 0) {
+      const next = await getNextDueCard();
+      setNextDue(next);
+      setPageState("empty");
+    } else {
+      setQueue(cards);
+      setCurrentIndex(0);
+      setPageState("session");
+    }
+  }, [router]);
 
   useEffect(() => {
-    async function init() {
-      const settings = await getSettings();
-      if (!settings.placementCompleted) {
-        router.replace("/placement");
-        return;
-      }
-      const cards = await buildSession();
-      setSession(cards);
-      setLoading(false);
-    }
-    init();
-  }, [router]);
+    loadSession();
+  }, [loadSession]);
 
   const handleRate = useCallback(
     async (rating: Grade) => {
-      const card = session[currentIndex];
+      const card = queue[currentIndex];
       await reviewCard(card.cardId, card.cardType, rating);
 
-      if (rating === Rating.Again) {
-        setIncorrectCount((c) => c + 1);
-      } else {
-        setCorrectCount((c) => c + 1);
-      }
+      const isCorrect = rating !== Rating.Again;
+      setCorrectCount((c) => c + (isCorrect ? 1 : 0));
+      setIncorrectCount((c) => c + (isCorrect ? 0 : 1));
+      setTotalReviewed((c) => c + 1);
 
       const next = currentIndex + 1;
-      if (next >= session.length) {
-        const elapsed = (Date.now() - startTime) / 1000;
-        setSummary({
-          totalReviewed: session.length,
-          newLearned: session.filter((s) => s.progress.state === 0).length,
-          correctCount: correctCount + (rating !== Rating.Again ? 1 : 0),
-          incorrectCount: incorrectCount + (rating === Rating.Again ? 1 : 0),
-          averageTime: elapsed / session.length,
-          streakDays: 0,
-        });
+      if (next >= queue.length) {
+        // Re-check for learning-step cards that became due during session
+        const dueSoon = await getDueSoonCards();
+        if (dueSoon.length > 0) {
+          setQueue(dueSoon);
+          setCurrentIndex(0);
+        } else {
+          const nextDueInfo = await getNextDueCard();
+          setNextDue(nextDueInfo);
+          setPageState("summary");
+        }
       } else {
         setCurrentIndex(next);
       }
     },
-    [session, currentIndex, correctCount, incorrectCount, startTime]
+    [queue, currentIndex]
   );
 
-  if (loading) {
+  const handleLearnMore = useCallback(async () => {
+    setPageState("loading");
+    const extra = await buildExtraNewCards(20);
+    if (extra.length === 0) {
+      const next = await getNextDueCard();
+      setNextDue(next);
+      setPageState("empty");
+      return;
+    }
+    setQueue(extra);
+    setCurrentIndex(0);
+    setPageState("session");
+  }, []);
+
+  if (pageState === "loading") {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -80,29 +111,44 @@ export default function LearnPage() {
     );
   }
 
-  if (session.length === 0) {
+  if (pageState === "empty") {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen px-4 gap-6">
         <Trophy className="h-16 w-16 text-yellow-500" />
         <div className="text-center">
           <h2 className="text-2xl font-bold mb-2">Tout est révisé !</h2>
-          <p className="text-muted-foreground">
-            Pas de cartes à réviser pour le moment. Revenez plus tard ou ajoutez
-            de nouvelles cartes.
-          </p>
+          {nextDue && (
+            <div className="flex items-center gap-2 justify-center text-muted-foreground mt-2">
+              <Clock className="h-4 w-4" />
+              <span>
+                Prochaine révision : {formatDueTime(nextDue.due)} ({nextDue.count} cartes)
+              </span>
+            </div>
+          )}
         </div>
-        <Button onClick={() => router.push("/")}>Retour à l&apos;accueil</Button>
+        <div className="flex flex-col gap-3 w-full max-w-sm">
+          <Button className="w-full gap-2" onClick={handleLearnMore}>
+            <Plus className="h-4 w-4" />
+            Apprendre 20 nouvelles cartes
+          </Button>
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() => router.push("/")}
+          >
+            Retour à l&apos;accueil
+          </Button>
+        </div>
       </div>
     );
   }
 
-  if (summary) {
+  if (pageState === "summary") {
     const accuracy =
-      summary.totalReviewed > 0
-        ? Math.round(
-            (summary.correctCount / summary.totalReviewed) * 100
-          )
+      totalReviewed > 0
+        ? Math.round((correctCount / totalReviewed) * 100)
         : 0;
+    const elapsed = (Date.now() - startTime) / 1000;
 
     return (
       <div className="flex flex-col items-center justify-center min-h-screen px-4 gap-6">
@@ -113,11 +159,7 @@ export default function LearnPage() {
           <CardContent className="p-6 space-y-4">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Cartes révisées</span>
-              <span className="font-bold">{summary.totalReviewed}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Nouvelles cartes</span>
-              <span className="font-bold">{summary.newLearned}</span>
+              <span className="font-bold">{totalReviewed}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Précision</span>
@@ -126,33 +168,46 @@ export default function LearnPage() {
             <div className="flex justify-between">
               <span className="text-muted-foreground">Temps moyen</span>
               <span className="font-bold">
-                {Math.round(summary.averageTime)}s
+                {totalReviewed > 0 ? Math.round(elapsed / totalReviewed) : 0}s
               </span>
             </div>
+            {nextDue && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground pt-2 border-t">
+                <Clock className="h-4 w-4" />
+                <span>
+                  Prochaine révision : {formatDueTime(nextDue.due)}
+                </span>
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        <div className="flex gap-3 w-full max-w-sm">
-          <Button
-            variant="outline"
-            className="flex-1"
-            onClick={() => router.push("/")}
-          >
-            Accueil
+        <div className="flex flex-col gap-3 w-full max-w-sm">
+          <Button className="w-full gap-2" onClick={handleLearnMore}>
+            <Plus className="h-4 w-4" />
+            Apprendre 20 nouvelles cartes
           </Button>
           <Button
-            className="flex-1"
-            onClick={() => window.location.reload()}
+            variant="outline"
+            className="w-full"
+            onClick={() => loadSession()}
           >
-            Encore une session
+            Vérifier les révisions dues
+          </Button>
+          <Button
+            variant="ghost"
+            className="w-full"
+            onClick={() => router.push("/")}
+          >
+            Retour à l&apos;accueil
           </Button>
         </div>
       </div>
     );
   }
 
-  const currentCard = session[currentIndex];
-  const progress = ((currentIndex) / session.length) * 100;
+  const currentCard = queue[currentIndex];
+  const progress = (currentIndex / queue.length) * 100;
 
   return (
     <div className="min-h-screen px-4 py-6 flex flex-col">
@@ -168,7 +223,7 @@ export default function LearnPage() {
           <Progress value={progress} className="h-2" />
         </div>
         <span className="text-sm text-muted-foreground min-w-[48px] text-right">
-          {currentIndex + 1}/{session.length}
+          {currentIndex + 1}/{queue.length}
         </span>
       </div>
 
@@ -188,4 +243,19 @@ export default function LearnPage() {
       </div>
     </div>
   );
+}
+
+function formatDueTime(due: Date): string {
+  const now = new Date();
+  const diffMs = due.getTime() - now.getTime();
+  const diffMin = Math.round(diffMs / 60000);
+
+  if (diffMin <= 0) return "maintenant";
+  if (diffMin < 60) return `dans ${diffMin} min`;
+
+  const diffHours = Math.round(diffMin / 60);
+  if (diffHours < 24) return `dans ${diffHours}h`;
+
+  const diffDays = Math.round(diffHours / 24);
+  return `dans ${diffDays} jour${diffDays > 1 ? "s" : ""}`;
 }

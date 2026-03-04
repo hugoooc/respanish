@@ -258,6 +258,79 @@ function shuffleArray<T>(arr: T[]): T[] {
   return shuffled;
 }
 
+export async function buildExtraNewCards(count: number = 20): Promise<SessionCard[]> {
+  const settings = await getSettings();
+  const now = new Date();
+  const session: SessionCard[] = [];
+
+  const allProgress = await getAllCardProgress();
+  const knownIds = new Set(allProgress.map((c) => c.cardId));
+  const allContent = getAllContentIds();
+
+  const unseen = allContent
+    .filter(
+      (c) => !knownIds.has(c.cardId) && c.band <= settings.currentBand
+    )
+    .slice(0, count);
+
+  for (const item of unseen) {
+    const emptyCard = createEmptyCard(now);
+    const progress = fsrsCardToProgress(emptyCard, item.cardId, item.cardType);
+    const content = getContentById(item.cardId, item.cardType);
+    if (!content) continue;
+    const sentence = getSentenceForCard(item.cardId);
+    session.push({
+      cardId: item.cardId,
+      cardType: item.cardType,
+      exerciseType: "multiple_choice",
+      progress,
+      content,
+      sentence,
+    });
+  }
+
+  return shuffleArray(session);
+}
+
+export async function getNextDueCard(): Promise<{ due: Date; count: number } | null> {
+  const allProgress = await getAllCardProgress();
+  const now = new Date();
+
+  const futureCards = allProgress
+    .filter((c) => new Date(c.due) > now)
+    .sort((a, b) => new Date(a.due).getTime() - new Date(b.due).getTime());
+
+  if (futureCards.length === 0) return null;
+
+  return {
+    due: new Date(futureCards[0].due),
+    count: futureCards.length,
+  };
+}
+
+export async function getDueSoonCards(): Promise<SessionCard[]> {
+  const now = new Date();
+  const dueCards = await getDueCards(now);
+  const session: SessionCard[] = [];
+
+  for (const progress of dueCards) {
+    const content = getContentById(progress.cardId, progress.cardType);
+    if (!content) continue;
+    const exerciseType = pickExerciseType(progress.state, progress.reps);
+    const sentence = getSentenceForCard(progress.cardId);
+    session.push({
+      cardId: progress.cardId,
+      cardType: progress.cardType,
+      exerciseType,
+      progress,
+      content,
+      sentence,
+    });
+  }
+
+  return session;
+}
+
 export function getDistractors(
   correctAnswer: string,
   cardType: CardType,

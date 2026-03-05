@@ -40,6 +40,73 @@ export interface SentenceEntry {
   grammar_id?: string;
 }
 
+// ─── Curriculum Types ────────────────────────────────────────────
+export type LessonStatus = "locked" | "available" | "in_progress" | "completed" | "mastered";
+
+export interface Lesson {
+  id: string;
+  unitId: string;
+  title: string;
+  description: string;
+  grammarFocus: string;
+  grammarIds: string[];
+  vocabIds: string[];
+  phraseIds: string[];
+  sentenceIds: string[];
+  scenarioTitle: string;
+  scenarioDescription: string;
+  order: number;
+}
+
+export interface Unit {
+  id: string;
+  title: string;
+  theme: string;
+  description: string;
+  grammarFocus: string;
+  order: number;
+  lessons: Lesson[];
+}
+
+export interface LessonProgress {
+  lessonId: string;
+  status: LessonStatus;
+  completedAt?: Date;
+  bestAccuracy?: number;
+  attempts: number;
+}
+
+export interface CurriculumProgress {
+  currentUnitId: string;
+  currentLessonId: string;
+  startedAt: Date;
+  targetWeeks: number;
+}
+
+export interface DimensionScores {
+  vocabMastery: number;
+  grammarMastery: number;
+  situationalMastery: number;
+  lastUpdated: Date;
+}
+
+export interface ComposedSession {
+  targetMinutes: number;
+  activities: SessionActivity[];
+  startedAt?: Date;
+  completedAt?: Date;
+}
+
+export type SessionActivityType = "review" | "lesson_study" | "lesson_practice" | "scenario";
+
+export interface SessionActivity {
+  type: SessionActivityType;
+  lessonId?: string;
+  estimatedMinutes: number;
+  completed: boolean;
+}
+
+// ─── Card & Content Types ────────────────────────────────────────
 export type CardType = "vocab" | "grammar" | "phrase";
 
 export type ExerciseType =
@@ -82,6 +149,12 @@ export interface UserSettings {
   currentBand: number;
   streakDays: number;
   lastSessionDate: string | null;
+  currentUnitId: string | null;
+  currentLessonId: string | null;
+  curriculumStartDate: string | null;
+  vocabMastery: number;
+  grammarMastery: number;
+  situationalMastery: number;
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -93,6 +166,12 @@ export const DEFAULT_SETTINGS: UserSettings = {
   currentBand: 1,
   streakDays: 0,
   lastSessionDate: null,
+  currentUnitId: null,
+  currentLessonId: null,
+  curriculumStartDate: null,
+  vocabMastery: 0,
+  grammarMastery: 0,
+  situationalMastery: 0,
 };
 
 export interface SessionCard {

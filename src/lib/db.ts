@@ -3,6 +3,7 @@ import type {
   CardProgress,
   ReviewLogEntry,
   UserSettings,
+  LessonProgress,
   CardType,
 } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
@@ -11,6 +12,7 @@ class ReSpanishDB extends Dexie {
   cardProgress!: EntityTable<CardProgress, "cardId">;
   reviewLogs!: EntityTable<ReviewLogEntry, "id">;
   settings!: EntityTable<UserSettings, "id">;
+  lessonProgress!: EntityTable<LessonProgress, "lessonId">;
 
   constructor() {
     super("respanish");
@@ -18,6 +20,12 @@ class ReSpanishDB extends Dexie {
       cardProgress: "cardId, cardType, due, state, [cardType+state]",
       reviewLogs: "++id, cardId, reviewedAt, [cardId+reviewedAt]",
       settings: "id",
+    });
+    this.version(2).stores({
+      cardProgress: "cardId, cardType, due, state, [cardType+state]",
+      reviewLogs: "++id, cardId, reviewedAt, [cardId+reviewedAt]",
+      settings: "id",
+      lessonProgress: "lessonId, status",
     });
   }
 }
@@ -136,26 +144,29 @@ export async function updateStreak(): Promise<number> {
 }
 
 export async function exportAllData(): Promise<string> {
-  const [cardProgress, reviewLogs, settings] = await Promise.all([
+  const [cardProgress, reviewLogs, settings, lessonProgress] = await Promise.all([
     db.cardProgress.toArray(),
     db.reviewLogs.toArray(),
     db.settings.toArray(),
+    db.lessonProgress.toArray(),
   ]);
-  return JSON.stringify({ cardProgress, reviewLogs, settings }, null, 2);
+  return JSON.stringify({ cardProgress, reviewLogs, settings, lessonProgress }, null, 2);
 }
 
 export async function importAllData(jsonStr: string): Promise<void> {
   const data = JSON.parse(jsonStr);
   await db.transaction(
     "rw",
-    [db.cardProgress, db.reviewLogs, db.settings],
+    [db.cardProgress, db.reviewLogs, db.settings, db.lessonProgress],
     async () => {
       await db.cardProgress.clear();
       await db.reviewLogs.clear();
       await db.settings.clear();
+      await db.lessonProgress.clear();
       if (data.cardProgress) await db.cardProgress.bulkPut(data.cardProgress);
       if (data.reviewLogs) await db.reviewLogs.bulkPut(data.reviewLogs);
       if (data.settings) await db.settings.bulkPut(data.settings);
+      if (data.lessonProgress) await db.lessonProgress.bulkPut(data.lessonProgress);
     }
   );
 }
@@ -163,11 +174,70 @@ export async function importAllData(jsonStr: string): Promise<void> {
 export async function clearAllData(): Promise<void> {
   await db.transaction(
     "rw",
-    [db.cardProgress, db.reviewLogs, db.settings],
+    [db.cardProgress, db.reviewLogs, db.settings, db.lessonProgress],
     async () => {
       await db.cardProgress.clear();
       await db.reviewLogs.clear();
       await db.settings.clear();
+      await db.lessonProgress.clear();
     }
   );
+}
+
+// ─── Lesson Progress ─────────────────────────────────────────────
+
+export async function getLessonProgress(
+  lessonId: string
+): Promise<LessonProgress | undefined> {
+  return db.lessonProgress.get(lessonId);
+}
+
+export async function getAllLessonProgress(): Promise<LessonProgress[]> {
+  return db.lessonProgress.toArray();
+}
+
+export async function upsertLessonProgress(
+  progress: LessonProgress
+): Promise<void> {
+  await db.lessonProgress.put(progress);
+}
+
+export async function completeLessonProgress(
+  lessonId: string,
+  accuracy: number
+): Promise<void> {
+  const existing = await getLessonProgress(lessonId);
+  const attempts = (existing?.attempts ?? 0) + 1;
+  const passed = accuracy >= 70;
+
+  await db.lessonProgress.put({
+    lessonId,
+    status: passed ? "completed" : "in_progress",
+    completedAt: passed ? new Date() : existing?.completedAt,
+    bestAccuracy: Math.max(accuracy, existing?.bestAccuracy ?? 0),
+    attempts,
+  });
+}
+
+export async function markLessonMastered(lessonId: string): Promise<void> {
+  const existing = await getLessonProgress(lessonId);
+  await db.lessonProgress.put({
+    lessonId,
+    status: "mastered",
+    completedAt: existing?.completedAt ?? new Date(),
+    bestAccuracy: existing?.bestAccuracy ?? 100,
+    attempts: existing?.attempts ?? 0,
+  });
+}
+
+export async function initCurriculumProgress(
+  startLessonId: string,
+  startUnitId: string
+): Promise<void> {
+  const today = new Date().toISOString().split("T")[0];
+  await updateSettings({
+    currentLessonId: startLessonId,
+    currentUnitId: startUnitId,
+    curriculumStartDate: today,
+  });
 }

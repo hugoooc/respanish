@@ -5,24 +5,31 @@ import { usePathname } from "next/navigation";
 import {
   Home,
   GraduationCap,
-  BookOpen,
+  Map,
   BarChart3,
   Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Home", icon: Home },
-  { href: "/learn", label: "Learn", icon: GraduationCap },
-  { href: "/browse", label: "Browse", icon: BookOpen },
+  { href: "/", label: "Accueil", icon: Home },
+  { href: "/session", label: "Session", icon: GraduationCap },
+  { href: "/curriculum", label: "Programme", icon: Map },
   { href: "/stats", label: "Stats", icon: BarChart3 },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/settings", label: "Réglages", icon: Settings },
 ] as const;
+
+const HIDDEN_PATHS = ["/placement", "/session/active"];
 
 export function BottomNav() {
   const pathname = usePathname();
 
-  if (pathname === "/placement") return null;
+  if (
+    HIDDEN_PATHS.includes(pathname) ||
+    pathname.startsWith("/lesson")
+  ) {
+    return null;
+  }
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
